@@ -23,7 +23,6 @@ import { createApp } from "../src/app.ts";
 import type { Config } from "../src/config.ts";
 import type { NetworkConfig } from "../src/config.ts";
 import type { AdminHooks } from "../src/routes/admin.ts";
-import { testAddress } from "./addresses.ts";
 
 // ── shared fixtures ──────────────────────────────────────────────────────────
 
@@ -210,7 +209,6 @@ describe("Indexer automatic pruning on tick", () => {
   test("prunes events older than retention window after each tick", async () => {
     const db = openDatabase(":memory:");
     try {
-      const storage = asStorage(db);
       const oldTime = Math.floor(Date.now() / 1000) - 60 * 86_400; // 60 days ago
       const recentTime = Math.floor(Date.now() / 1000) - 1 * 86_400; // 1 day ago
 

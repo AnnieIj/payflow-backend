@@ -159,9 +159,9 @@ export interface IndexerStatus {
    * events are kept indefinitely. Set by the operator via
    * `RAW_EVENT_RETENTION_DAYS` (or `DATA_RETENTION_DAYS` as a fallback).
    * Surfaced on `/health` so a monitoring dashboard can confirm the policy
-   * is what the operator intended.
+   * is what the operator intended. Undefined until the first tick.
    */
-  rawEventRetentionDays?: number;
+  rawEventRetentionDays?: number | undefined;
   /**
    * Wall-clock timestamp (unix seconds) when the last automatic prune of the
    * `events` table completed. Null until the first prune pass has run.
