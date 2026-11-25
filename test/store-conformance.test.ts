@@ -83,14 +83,10 @@ for (const backend of backends) {
     });
 
     beforeEach(async () => {
-      // Start each test with a clean slate. conform_kv is the main test
-      // table; cursor, events and plans are application tables that a few
-      // edge-case tests write to — clear them too so a failure or ordering
-      // change in one test cannot affect the next.
+      // Wipe only the test table between tests. The edge-case tests that
+      // touch application tables (cursor, events, plans) clean up after
+      // themselves so this hook stays simple and cannot race.
       await db.run("DELETE FROM conform_kv");
-      await db.run("DELETE FROM cursor");
-      await db.run("DELETE FROM events");
-      await db.run("DELETE FROM plans");
     });
 
     // ── 1. dialect ──────────────────────────────────────────────────────────
@@ -403,56 +399,71 @@ for (const backend of backends) {
     });
 
     test("the cursor table supports the standard upsert the indexer uses", async () => {
-      await db.run(
-        `INSERT INTO cursor (id, last_ledger) VALUES (1, ?)
-         ON CONFLICT(id) DO UPDATE SET last_ledger = excluded.last_ledger`,
-        [100],
-      );
-      const first = await db.get<{ last_ledger: number }>(
-        "SELECT last_ledger FROM cursor WHERE id = 1",
-      );
-      assert.equal(first?.last_ledger, 100);
+      // Use DELETE after to leave the table clean for other tests in this describe block.
+      try {
+        await db.run(
+          `INSERT INTO cursor (id, last_ledger) VALUES (1, ?)
+           ON CONFLICT(id) DO UPDATE SET last_ledger = excluded.last_ledger`,
+          [100],
+        );
+        const first = await db.get<{ last_ledger: number }>(
+          "SELECT last_ledger FROM cursor WHERE id = 1",
+        );
+        assert.equal(first?.last_ledger, 100);
 
-      await db.run(
-        `INSERT INTO cursor (id, last_ledger) VALUES (1, ?)
-         ON CONFLICT(id) DO UPDATE SET last_ledger = excluded.last_ledger`,
-        [200],
-      );
-      const second = await db.get<{ last_ledger: number }>(
-        "SELECT last_ledger FROM cursor WHERE id = 1",
-      );
-      assert.equal(second?.last_ledger, 200);
+        await db.run(
+          `INSERT INTO cursor (id, last_ledger) VALUES (1, ?)
+           ON CONFLICT(id) DO UPDATE SET last_ledger = excluded.last_ledger`,
+          [200],
+        );
+        const second = await db.get<{ last_ledger: number }>(
+          "SELECT last_ledger FROM cursor WHERE id = 1",
+        );
+        assert.equal(second?.last_ledger, 200);
+      } finally {
+        await db.run("DELETE FROM cursor");
+      }
     });
 
     test("the events table supports INSERT OR IGNORE idempotency", async () => {
-      const insert = `
-        INSERT OR IGNORE INTO events
-          (event_id, contract_id, ledger, tx_hash, event_index, topics, data, close_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      const params = ["evt-1", "C".repeat(56), 10, "tx-1", "", "[]", "", null];
-      await db.run(insert, params);
-      await db.run(insert, params); // replay — must not throw or duplicate
-      const rows = await db.all<{ event_id: string }>(
-        "SELECT event_id FROM events WHERE event_id = ?",
-        ["evt-1"],
-      );
-      assert.equal(rows.length, 1, "replayed event must not create a duplicate row");
+      try {
+        const insert = `
+          INSERT OR IGNORE INTO events
+            (event_id, contract_id, ledger, tx_hash, event_index, topics, data, close_time)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        const params = ["evt-conform-1", "C".repeat(56), 10, "tx-conform-1", "", "[]", "", null];
+        await db.run(insert, params);
+        await db.run(insert, params); // replay — must not throw or duplicate
+        const rows = await db.all<{ event_id: string }>(
+          "SELECT event_id FROM events WHERE event_id = ?",
+          ["evt-conform-1"],
+        );
+        assert.equal(rows.length, 1, "replayed event must not create a duplicate row");
+      } finally {
+        await db.run("DELETE FROM events WHERE event_id = ?", ["evt-conform-1"]);
+      }
     });
 
     test("plan row survives an upsert round-trip with large bigint amount", async () => {
-      const amount = "9007199254740993"; // exceeds Number.MAX_SAFE_INTEGER
-      const merchant = "G" + "B".repeat(55);
-      await db.run(
-        `INSERT INTO plans (id, merchant, name, token, amount, period, active, ledger)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [1, merchant, "Test", "C".repeat(56), amount, 2592000, 1, 10],
-      );
-      const row = await db.get<{ amount: string }>(
-        "SELECT amount FROM plans WHERE id = ?",
-        [1],
-      );
-      assert.equal(row?.amount, amount, "bigint amount must survive without precision loss");
+      // Use a high plan id (99999) unlikely to conflict with other tests.
+      const planId = 99999;
+      try {
+        const amount = "9007199254740993"; // exceeds Number.MAX_SAFE_INTEGER
+        const merchant = "G" + "B".repeat(55);
+        await db.run(
+          `INSERT INTO plans (id, merchant, name, token, amount, period, active, ledger)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [planId, merchant, "Test", "C".repeat(56), amount, 2592000, 1, 10],
+        );
+        const row = await db.get<{ amount: string }>(
+          "SELECT amount FROM plans WHERE id = ?",
+          [planId],
+        );
+        assert.equal(row?.amount, amount, "bigint amount must survive without precision loss");
+      } finally {
+        await db.run("DELETE FROM plans WHERE id = ?", [planId]);
+      }
     });
 
     // ── 8. close ─────────────────────────────────────────────────────────────
