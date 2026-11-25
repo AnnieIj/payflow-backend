@@ -566,6 +566,28 @@ export async function getPastDueMandates(db: Storage): Promise<Array<{ mandate_i
   );
 }
 
+/**
+ * Run `VACUUM` and then `PRAGMA optimize` against the database.
+ *
+ * `VACUUM` rewrites the entire database file, reclaims free pages left by
+ * DELETEs and rebuilds indexes. `PRAGMA optimize` updates the statistics SQLite
+ * uses to choose query plans (the equivalent of PostgreSQL's ANALYZE), which
+ * is cheap — it only analyses tables whose statistics are out of date — and
+ * safe to run while the database is live.
+ *
+ * The two operations are run outside any transaction (`VACUUM` requires that).
+ * On a WAL-mode database `VACUUM` also checkpoints and resets the WAL, so the
+ * call implicitly combines what `PRAGMA wal_checkpoint(TRUNCATE)` does.
+ *
+ * Returns a summary of what was done so the admin response carries useful
+ * diagnostic information.
+ */
+export function vacuumDatabase(db: DatabaseSync): { vacuumed: true; optimized: true } {
+  db.exec("VACUUM");
+  db.exec("PRAGMA optimize");
+  return { vacuumed: true, optimized: true };
+}
+
 /** Back up the database to `backupPath` with a transactionally consistent snapshot. */
 export function backupDatabase(db: DatabaseSync, backupPath: string): void {
   // Checkpoint the WAL so the main file holds all committed data before we

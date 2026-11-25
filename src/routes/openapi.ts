@@ -1803,6 +1803,43 @@ function servicePaths(): Record<string, PathItemObject> {
         },
       },
     },
+    "/admin/db/vacuum": {
+      post: {
+        tags: ["admin"],
+        summary: "VACUUM and ANALYZE the database",
+        description:
+          "Runs `VACUUM` followed by `PRAGMA optimize` (the SQLite equivalent of ANALYZE) against the database. `VACUUM` rewrites the file, reclaims free pages left by `DELETE` operations and rebuilds indexes; `PRAGMA optimize` refreshes the query-planner statistics for tables whose row counts have changed. The two operations run outside any transaction and can take seconds on a large database; the endpoint answers only after both finish. Only supported on the SQLite backend; a PostgreSQL instance answers 503. Needs a bearer token, and is only present when ADMIN_TOKEN is set.",
+        operationId: "postDbVacuum",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "The maintenance ran.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", enum: ["ok"] },
+                    result: {
+                      type: "object",
+                      properties: {
+                        vacuumed: { type: "boolean", enum: [true] },
+                        optimized: { type: "boolean", enum: [true] },
+                      },
+                      required: ["vacuumed", "optimized"],
+                    },
+                  },
+                  required: ["status", "result"],
+                },
+              },
+            },
+          },
+          "401": errorResponse('The bearer token is missing or wrong (error.code = "unauthorized").'),
+          "503": transient503("Database maintenance is not available on this instance (e.g. PostgreSQL backend)."),
+          "500": errorResponse("The maintenance operation threw; the message is kept for the operator."),
+        },
+      },
+    },
   };
 }
 
