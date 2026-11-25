@@ -281,6 +281,28 @@ CREATE TABLE IF NOT EXISTS keeper_claims (
   PRIMARY KEY (mandate_id, due_at)
 );
 CREATE INDEX IF NOT EXISTS keeper_claims_expires_at ON keeper_claims(expires_at);
+
+-- listMandates merchant+status paging: (merchant, status, id) lets the planner
+-- seek both equality predicates and the cursor (id < ?) without re-checking
+-- status from the table on each row.
+CREATE INDEX IF NOT EXISTS mandates_merchant_status_id ON mandates(merchant, status, id);
+
+-- getProtocolStats COUNT(DISTINCT merchant) WHERE status = 'Active': covering
+-- (status, merchant) index lets the planner read merchant from the index
+-- without a table visit or a temp B-tree to deduplicate.
+CREATE INDEX IF NOT EXISTS mandates_status_merchant ON mandates(status, merchant);
+
+-- listMandateCharges ORDER BY ledger DESC: (mandate_id, ledger DESC, tx_hash)
+-- serves the mandate_id equality and delivers rows in ledger+tx_hash order,
+-- eliminating the temp B-tree the existing charges_mandate_created_at index
+-- triggers for this sort.
+CREATE INDEX IF NOT EXISTS charges_mandate_ledger ON charges(mandate_id, ledger DESC, tx_hash);
+
+-- getSubscriberExport charges ORDER BY ledger ASC, tx_hash ASC: the existing
+-- charges_subscriber_created_at index (subscriber, created_at) serves the
+-- lookup but not the sort, so a temp B-tree is needed.  (subscriber, ledger,
+-- tx_hash) covers both.
+CREATE INDEX IF NOT EXISTS charges_subscriber_ledger ON charges(subscriber, ledger, tx_hash);
 `;
 
 const schemaName = /^[a-z_][a-z0-9_]*$/;

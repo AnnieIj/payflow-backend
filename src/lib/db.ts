@@ -380,6 +380,33 @@ const ADDED_INDEXES: ReadonlyArray<[table: string, name: string, columns: string
   // (ledger, event_id) order from the page cursor, so the range, the filter
   // and the order all come from the index instead of every contract's rows.
   ["events", "events_contract_ledger", "contract_id, ledger, event_id"],
+  // listMandates with merchant + status filter: mandates_merchant does not
+  // include the status column, so SQLite re-checks status on every row it
+  // fetches from the table. The combined (merchant, status, id) index covers
+  // the equality predicates and the cursor (id < ?) without a table visit for
+  // the status check, cutting the per-page cost from O(merchant rows) to
+  // O(matching rows).
+  ["mandates", "mandates_merchant_status_id", "merchant, status, id"],
+  // getProtocolStats counts distinct active merchants with
+  // COUNT(DISTINCT merchant) WHERE status = 'Active'. mandates_due is
+  // (status, next_charge) and does not include merchant, so the planner falls
+  // back to a full scan of that index with a temp B-tree to deduplicate.
+  // A covering (status, merchant) index lets the planner seek status = 'Active'
+  // and read merchant directly from the index — no table access, no temp tree.
+  ["mandates", "mandates_status_merchant", "status, merchant"],
+  // listMandateCharges orders by ledger DESC. charges_mandate_created_at is
+  // (mandate_id, created_at) and serves the lookup but not the ORDER BY
+  // (created_at ≠ ledger), so SQLite builds a temp B-tree to sort the results.
+  // Adding (mandate_id, ledger DESC, tx_hash) covers the mandate_id equality,
+  // yields rows already in ORDER BY ledger DESC, tx_hash direction, and
+  // includes tx_hash so the tiebreak needs no extra sort step.
+  ["charges", "charges_mandate_ledger", "mandate_id, ledger DESC, tx_hash"],
+  // getSubscriberExport reads one subscriber's charges ordered by ledger ASC,
+  // tx_hash ASC. charges_subscriber_created_at is (subscriber, created_at) so
+  // the lookup hits the index but the ORDER BY (ledger, tx_hash) forces a temp
+  // B-tree. The (subscriber, ledger, tx_hash) index serves both the equality
+  // filter and the ascending sort without a sort step.
+  ["charges", "charges_subscriber_ledger", "subscriber, ledger, tx_hash"],
 ];
 
 export function migrate(db: DatabaseSync): void {
