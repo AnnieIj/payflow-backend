@@ -83,9 +83,14 @@ for (const backend of backends) {
     });
 
     beforeEach(async () => {
-      // Start each test with an empty table so writes in one test cannot
-      // affect the next.
+      // Start each test with a clean slate. conform_kv is the main test
+      // table; cursor, events and plans are application tables that a few
+      // edge-case tests write to — clear them too so a failure or ordering
+      // change in one test cannot affect the next.
       await db.run("DELETE FROM conform_kv");
+      await db.run("DELETE FROM cursor");
+      await db.run("DELETE FROM events");
+      await db.run("DELETE FROM plans");
     });
 
     // ── 1. dialect ──────────────────────────────────────────────────────────
@@ -451,11 +456,12 @@ for (const backend of backends) {
     });
 
     // ── 8. close ─────────────────────────────────────────────────────────────
-    // These two tests open their own store so they can test close() independently
-    // of the shared store used by all other tests in this describe block.
+    // These tests use a fresh SQLite in-memory store rather than opening
+    // another PostgresStorage, since close() lifecycle is dialect-independent
+    // and opening a new PostgreSQL schema just to close it wastes connections.
 
     test("close resolves without throwing on first call", async () => {
-      const fresh = await backend.open();
+      const fresh = SqliteStorage.open(":memory:");
       await assert.doesNotReject(fresh.close());
     });
 
@@ -464,7 +470,7 @@ for (const backend of backends) {
       // The two backends differ on a second close: PostgreSQL throws
       // "Called end on pool more than once"; SQLite throws "database is not open".
       // Both behaviours are acceptable as long as the first close succeeds.
-      const fresh = await backend.open();
+      const fresh = SqliteStorage.open(":memory:");
       await fresh.close(); // first close — must always succeed
       try {
         await fresh.close(); // second close — allowed to throw
